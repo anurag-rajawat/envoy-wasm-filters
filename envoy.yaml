@@ -1,17 +1,3 @@
-# Copyright 2022 Google LLC
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#      http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 static_resources:
   listeners:
     address:
@@ -37,7 +23,7 @@ static_resources:
                         direct_response:
                           status: 200
                           body:
-                            inline_string: "Request /hello and be welcomed!\n"
+                            inline_string: "Namaste world!"
               http_filters:
                 - name: envoy.filters.http.wasm
                   typed_config:
@@ -45,7 +31,16 @@ static_resources:
                     type_url: type.googleapis.com/envoy.extensions.filters.http.wasm.v3.Wasm
                     value:
                       config:
-                        name: "http_headers"
+                        name: "httpfilter"
+                        root_id: "httpfilter"
+#                        configuration:
+#                          "@type": "type.googleapis.com/google.protobuf.StringValue"
+#                          value: |
+#
+#                            pluginConfig:
+#                              upstream_name: "cluster-name"
+#                              authority: "<service>.<namespace>.svc.cluster.local"
+#                              api_path: "/pod-lookup"
                         vm_config:
                           runtime: "envoy.wasm.runtime.v8"
                           code:
@@ -54,3 +49,16 @@ static_resources:
                 - name: envoy.filters.http.router
                   typed_config:
                     "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+  clusters:
+    - name: "filterserver"
+      connect_timeout: 1s
+      type: STRICT_DNS
+      load_assignment:
+        cluster_name: "filterserver"
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: 192.168.31.226 #
+                      port_value: 8080

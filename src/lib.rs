@@ -1,24 +1,97 @@
-use log::{error, info};
+use log::{error, warn};
 use proxy_wasm::traits::{Context, HttpContext, RootContext};
 use proxy_wasm::types::{Action, ContextType, LogLevel};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-proxy_wasm::main! {{
-    proxy_wasm::set_log_level(LogLevel::Trace);
-    proxy_wasm::set_root_context(|_| -> Box<dyn RootContext> {Box::new(HttpHeadersRoot)});
-}}
+#[derive(Default)]
+struct Plugin {
+    _context_id: u32,
+    config: PluginConfig,
+}
 
-struct HttpHeadersRoot;
+#[derive(Serialize, Deserialize, Clone, Default)]
+struct PluginConfig {
+    upstream_name: String,
+    api_path: String,
+    authority: String,
+}
 
-impl Context for HttpHeadersRoot {}
+#[derive(Serialize)]
+struct Telemetry {
+    telemetry_type: Type,
+    request: Option<Reqquest>,
+    response: Option<Ressponse>,
+}
 
-impl RootContext for HttpHeadersRoot {
-    fn create_http_context(&self, context_id: u32) -> Option<Box<dyn HttpContext>> {
-        Some(Box::new(Telemetry {
-            context_id,
-            request: None,
-            response: None,
+#[derive(Serialize)]
+enum Type {
+    RequestHeader,
+    Request,
+    ResponseHeader,
+    Response,
+}
+
+#[derive(Serialize)]
+struct Reqquest {
+    headers: Option<ReqHeaders>,
+    source_url: String,
+    source_port: u16,
+    destination_url: String,
+    destination_port: u16,
+}
+
+#[derive(Serialize)]
+struct Ressponse {
+    headers: Option<ResHeaders>,
+    body: String,
+}
+
+#[derive(Serialize)]
+struct ReqHeaders {
+    authority: String,
+    path: String,
+    method: String,
+    scheme: String,
+    protocol: String,
+    request_id: String,
+    user_agent: String,
+}
+
+#[derive(Serialize)]
+struct ResHeaders {
+    status_code: u16,
+    content_length: u32,
+    content_type: String,
+}
+
+fn _start() {
+    proxy_wasm::main! {{
+        proxy_wasm::set_log_level(LogLevel::Info);
+        proxy_wasm::set_root_context(|_| -> Box<dyn RootContext> {Box::new(Plugin::default())});
+    }}
+}
+
+impl Context for Plugin {}
+
+impl RootContext for Plugin {
+    fn on_configure(&mut self, _plugin_configuration_size: usize) -> bool {
+        if let Some(config_bytes) = self.get_plugin_configuration() {
+            if let Ok(config) = serde_json::from_slice::<PluginConfig>(&config_bytes) {
+                self.config = config;
+            } else {
+                error!("Failed to parse plugin config");
+            }
+        } else {
+            warn!("No plugin config found");
+        }
+        true
+    }
+
+    fn create_http_context(&self, _context_id: u32) -> Option<Box<dyn HttpContext>> {
+        Some(Box::new(Plugin {
+            _context_id,
+            config: self.config.clone(),
         }))
     }
 
@@ -27,40 +100,7 @@ impl RootContext for HttpHeadersRoot {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-struct Telemetry {
-    context_id: u32,
-    request: Option<Reqquest>,
-    response: Option<Response>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct Reqquest {
-    authority: String,
-    path: String,
-    method: String,
-    scheme: String,
-    request_protocol: String,
-    request_id: String,
-    user_agent: String,
-    source_url: String,
-    source_port: u16,
-    destination_url: String,
-    destination_port: u16,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct Response {
-    status_code: String,
-    content_length: String,
-    content_type: String,
-    body: String,
-    body_size: String,
-}
-
-impl Context for Telemetry {}
-
-impl HttpContext for Telemetry {
+impl HttpContext for Plugin {
     fn on_http_request_headers(&mut self, _num_headers: usize, _end_of_stream: bool) -> Action {
         let (dest_url, dest_port) = get_url_and_port(
             String::from_utf8(
@@ -68,7 +108,7 @@ impl HttpContext for Telemetry {
                     .unwrap()
                     .to_vec(),
             )
-            .unwrap_or(String::from("")),
+            .unwrap_or("".to_string()),
         );
 
         let (src_url, src_port) = get_url_and_port(
@@ -77,36 +117,13 @@ impl HttpContext for Telemetry {
                     .unwrap()
                     .to_vec(),
             )
-            .unwrap_or(String::from("")),
+            .unwrap_or("".to_string()),
         );
 
         let telemetry = Telemetry {
-            context_id: self.context_id,
+            telemetry_type: Type::RequestHeader,
             request: Some(Reqquest {
-                authority: self
-                    .get_http_request_header(":authority")
-                    .unwrap_or(String::from("")),
-                path: self
-                    .get_http_request_header(":path")
-                    .unwrap_or(String::from("")),
-                method: self
-                    .get_http_request_header(":method")
-                    .unwrap_or(String::from("")),
-                scheme: self
-                    .get_http_request_header(":scheme")
-                    .unwrap_or(String::from("")),
-                request_protocol: String::from_utf8(
-                    self.get_property(vec!["request", "protocol"])
-                        .unwrap()
-                        .to_vec(),
-                )
-                .unwrap_or(String::from("")),
-                request_id: self
-                    .get_http_request_header("x-request-id")
-                    .unwrap_or(String::from("")),
-                user_agent: self
-                    .get_http_request_header("user-agent")
-                    .unwrap_or(String::from("")),
+                headers: Some(construct_req_headers(self)),
                 source_url: src_url,
                 source_port: src_port,
                 destination_url: dest_url,
@@ -116,16 +133,7 @@ impl HttpContext for Telemetry {
         };
 
         let telemetry_json = serde_json::to_string(&telemetry).unwrap();
-        let result = self.dispatch_http_call(
-            "how-to-know-about-this",
-            vec![("Powered-by", "proxy-wasm")],
-            Some(telemetry_json.as_bytes()),
-            vec![],
-            Duration::from_secs(5),
-        );
-        info!("Result is: {}", result.unwrap_or_default());
-        info!("Request telemetry json is: {:?}", telemetry_json);
-        Action::Continue
+        dispatch_http_call_to_sentryflow(self, telemetry_json)
     }
 
     fn on_http_request_body(&mut self, _body_size: usize, _end_of_stream: bool) -> Action {
@@ -134,48 +142,128 @@ impl HttpContext for Telemetry {
 
     fn on_http_response_headers(&mut self, _num_headers: usize, _end_of_stream: bool) -> Action {
         let telemetry = Telemetry {
-            context_id: self.context_id,
+            telemetry_type: Type::ResponseHeader,
             request: None,
-            response: Some(Response {
-                status_code: self
-                    .get_http_response_header(":status")
-                    .unwrap_or(String::from("")),
-                content_length: self
-                    .get_http_response_header("content-length")
-                    .unwrap_or(String::from("")),
-                content_type: self
-                    .get_http_response_header("content-type")
-                    .unwrap_or(String::from("")),
+            response: Some(Ressponse {
+                headers: Some(construct_res_headers(self)),
                 body: "".to_string(),
-                body_size: "".to_string(),
             }),
         };
 
         let telemetry_json = serde_json::to_string(&telemetry).unwrap();
-        info!("Response telemetry is: {:?}", telemetry);
-        info!("Response telemetry json is: {:?}", telemetry_json);
-        Action::Continue
+        dispatch_http_call_to_sentryflow(self, telemetry_json)
     }
 
     fn on_http_response_body(&mut self, _body_size: usize, _end_of_stream: bool) -> Action {
         let body = String::from_utf8(self.get_http_response_body(0, _body_size).unwrap().to_vec())
             .unwrap();
-        info!("Response body is: {:?}", body);
-        Action::Continue
+
+        let telemetry = Telemetry {
+            telemetry_type: Type::Response,
+            request: None,
+            response: Some(Ressponse {
+                headers: None,
+                body,
+            }),
+        };
+
+        let telemetry_json = serde_json::to_string(&telemetry).unwrap();
+        dispatch_http_call_to_sentryflow(self, telemetry_json)
     }
 }
 
-fn get_url_and_port(destination_address: String) -> (String, u16) {
-    let parts: Vec<&str> = destination_address.split(':').collect();
+fn dispatch_http_call_to_sentryflow(obj: &mut Plugin, telemetry: String) -> Action {
+    // Todo: Configure it to consume provided plugin config
+    const UPSTREAM: &str = "filterserver";
 
-    let mut url: String = "".to_string();
-    let mut port: u16 = 0;
+    let headers = vec![
+        (":method", "POST"),
+        (":authority", "sentryflow"),
+        (":path", "/api/telemetry"),
+        ("accept", "*/*"),
+        ("Content-Type", "application/json"),
+    ];
+
+    let http_call_res = obj.dispatch_http_call(
+        UPSTREAM,
+        headers,
+        Some(telemetry.as_bytes()),
+        vec![],
+        Duration::from_secs(1),
+    );
+
+    if http_call_res.is_err() {
+        error!(
+            "Failed to dispatch HTTP call, to '{}' status: {http_call_res:#?}",
+            UPSTREAM,
+        );
+    }
+
+    Action::Continue
+}
+
+fn construct_res_headers(obj: &mut Plugin) -> ResHeaders {
+    let status_code: u16 = obj
+        .get_http_response_header(":status")
+        .unwrap()
+        .parse()
+        .unwrap_or(0);
+
+    let content_length: u32 = obj
+        .get_http_response_header("content-length")
+        .unwrap()
+        .parse()
+        .unwrap_or(0);
+
+    ResHeaders {
+        status_code,
+        content_length,
+        content_type: obj
+            .get_http_response_header("content-type")
+            .unwrap_or("".to_string()),
+    }
+}
+
+fn construct_req_headers(obj: &mut Plugin) -> ReqHeaders {
+    ReqHeaders {
+        authority: obj
+            .get_http_request_header(":authority")
+            .unwrap_or("".to_string()),
+        path: obj
+            .get_http_request_header(":path")
+            .unwrap_or("".to_string()),
+        method: obj
+            .get_http_request_header(":method")
+            .unwrap_or("".to_string()),
+        scheme: obj
+            .get_http_request_header(":scheme")
+            .unwrap_or("".to_string()),
+        protocol: String::from_utf8(
+            obj.get_property(vec!["request", "protocol"])
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap_or("".to_string()),
+        request_id: obj
+            .get_http_request_header("x-request-id")
+            .unwrap_or("".to_string()),
+        user_agent: obj
+            .get_http_request_header("user-agent")
+            .unwrap_or("".to_string()),
+    }
+}
+
+fn get_url_and_port(address: String) -> (String, u16) {
+    let parts: Vec<&str> = address.split(':').collect();
+
+    let mut url = "".to_string();
+    let mut port = 0;
 
     if parts.len() == 2 {
         url = parts[0].parse().unwrap();
         port = parts[1].parse().unwrap();
     } else {
-        error!("Invalid destination address");
+        error!("Invalid address");
     }
 
     (url, port)

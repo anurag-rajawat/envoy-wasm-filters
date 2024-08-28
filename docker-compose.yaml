@@ -4,10 +4,13 @@ services:
     hostname: envoy
     volumes:
       - ./envoy.yaml:/etc/envoy/envoy.yaml
-      - ./target/wasm32-wasi/release:/etc/envoy/proxy-wasm-plugins
+      - ./target/wasm32-unknown-unknown/release:/etc/envoy/proxy-wasm-plugins
     networks:
       - envoymesh
     ports:
       - "10000:10000"
+    environment:
+      UPSTREAM: filterserver
+
 networks:
   envoymesh: { }
