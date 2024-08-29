@@ -105,19 +105,17 @@ impl HttpContext for Plugin {
         let (dest_url, dest_port) = get_url_and_port(
             String::from_utf8(
                 self.get_property(vec!["destination", "address"])
-                    .unwrap()
-                    .to_vec(),
+                    .unwrap_or_default(),
             )
-            .unwrap_or("".to_string()),
+            .unwrap_or_default(),
         );
 
         let (src_url, src_port) = get_url_and_port(
             String::from_utf8(
                 self.get_property(vec!["source", "address"])
-                    .unwrap()
-                    .to_vec(),
+                    .unwrap_or_default(),
             )
-            .unwrap_or("".to_string()),
+            .unwrap_or_default(),
         );
 
         let telemetry = Telemetry {
@@ -132,7 +130,7 @@ impl HttpContext for Plugin {
             response: None,
         };
 
-        let telemetry_json = serde_json::to_string(&telemetry).unwrap();
+        let telemetry_json = serde_json::to_string(&telemetry).unwrap_or_default();
         dispatch_http_call_to_sentryflow(self, telemetry_json)
     }
 
@@ -150,13 +148,16 @@ impl HttpContext for Plugin {
             }),
         };
 
-        let telemetry_json = serde_json::to_string(&telemetry).unwrap();
+        let telemetry_json = serde_json::to_string(&telemetry).unwrap_or_default();
         dispatch_http_call_to_sentryflow(self, telemetry_json)
     }
 
     fn on_http_response_body(&mut self, _body_size: usize, _end_of_stream: bool) -> Action {
-        let body = String::from_utf8(self.get_http_response_body(0, _body_size).unwrap().to_vec())
-            .unwrap();
+        let body = String::from_utf8(
+            self.get_http_response_body(0, _body_size)
+                .unwrap_or_default(),
+        )
+        .unwrap_or_default();
 
         let telemetry = Telemetry {
             telemetry_type: Type::Response,
@@ -167,7 +168,7 @@ impl HttpContext for Plugin {
             }),
         };
 
-        let telemetry_json = serde_json::to_string(&telemetry).unwrap();
+        let telemetry_json = serde_json::to_string(&telemetry).unwrap_or_default();
         dispatch_http_call_to_sentryflow(self, telemetry_json)
     }
 }
@@ -202,22 +203,22 @@ fn dispatch_http_call_to_sentryflow(obj: &mut Plugin, telemetry: String) -> Acti
 fn construct_res_headers(obj: &mut Plugin) -> ResHeaders {
     let status_code: u16 = obj
         .get_http_response_header(":status")
-        .unwrap()
+        .unwrap_or_default()
         .parse()
-        .unwrap_or(0);
+        .unwrap_or_default();
 
     let content_length: u32 = obj
         .get_http_response_header("content-length")
-        .unwrap()
+        .unwrap_or_default()
         .parse()
-        .unwrap_or(0);
+        .unwrap_or_default();
 
     ResHeaders {
         status_code,
         content_length,
         content_type: obj
             .get_http_response_header("content-type")
-            .unwrap_or("".to_string()),
+            .unwrap_or_default(),
     }
 }
 
@@ -225,28 +226,21 @@ fn construct_req_headers(obj: &mut Plugin) -> ReqHeaders {
     ReqHeaders {
         authority: obj
             .get_http_request_header(":authority")
-            .unwrap_or("".to_string()),
-        path: obj
-            .get_http_request_header(":path")
-            .unwrap_or("".to_string()),
-        method: obj
-            .get_http_request_header(":method")
-            .unwrap_or("".to_string()),
-        scheme: obj
-            .get_http_request_header(":scheme")
-            .unwrap_or("".to_string()),
+            .unwrap_or_default(),
+        path: obj.get_http_request_header(":path").unwrap_or_default(),
+        method: obj.get_http_request_header(":method").unwrap_or_default(),
+        scheme: obj.get_http_request_header(":scheme").unwrap_or_default(),
         protocol: String::from_utf8(
             obj.get_property(vec!["request", "protocol"])
-                .unwrap()
-                .to_vec(),
+                .unwrap_or_default(),
         )
-        .unwrap_or("".to_string()),
+        .unwrap_or_default(),
         request_id: obj
             .get_http_request_header("x-request-id")
-            .unwrap_or("".to_string()),
+            .unwrap_or_default(),
         user_agent: obj
             .get_http_request_header("user-agent")
-            .unwrap_or("".to_string()),
+            .unwrap_or_default(),
     }
 }
 
