@@ -173,19 +173,16 @@ impl HttpContext for Plugin {
 }
 
 fn dispatch_http_call_to_sentryflow(obj: &mut Plugin, telemetry: String) -> Action {
-    // Todo: Configure it to consume provided plugin config
-    const UPSTREAM: &str = "filterserver";
-
     let headers = vec![
         (":method", "POST"),
-        (":authority", "sentryflow"),
-        (":path", "/api/telemetry"),
+        (":authority", &obj.config.authority),
+        (":path", &obj.config.api_path),
         ("accept", "*/*"),
         ("Content-Type", "application/json"),
     ];
 
     let http_call_res = obj.dispatch_http_call(
-        UPSTREAM,
+        &obj.config.upstream_name,
         headers,
         Some(telemetry.as_bytes()),
         vec![],
@@ -195,7 +192,7 @@ fn dispatch_http_call_to_sentryflow(obj: &mut Plugin, telemetry: String) -> Acti
     if http_call_res.is_err() {
         error!(
             "Failed to dispatch HTTP call, to '{}' status: {http_call_res:#?}",
-            UPSTREAM,
+            &obj.config.upstream_name,
         );
     }
 

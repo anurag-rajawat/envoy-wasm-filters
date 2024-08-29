@@ -33,14 +33,14 @@ static_resources:
                       config:
                         name: "httpfilter"
                         root_id: "httpfilter"
-#                        configuration:
-#                          "@type": "type.googleapis.com/google.protobuf.StringValue"
-#                          value: |
-#
-#                            pluginConfig:
-#                              upstream_name: "cluster-name"
-#                              authority: "<service>.<namespace>.svc.cluster.local"
-#                              api_path: "/pod-lookup"
+                        configuration:
+                          "@type": "type.googleapis.com/google.protobuf.StringValue"
+                          value: |
+                            {
+                                "upstream_name": "filterserver",
+                                "authority": "sentryflow",
+                                "api_path": "/api/telemetry"
+                            }
                         vm_config:
                           runtime: "envoy.wasm.runtime.v8"
                           code:
@@ -52,7 +52,7 @@ static_resources:
   clusters:
     - name: "filterserver"
       connect_timeout: 1s
-      type: STRICT_DNS
+#      type: STRICT_DNS
       load_assignment:
         cluster_name: "filterserver"
         endpoints:
