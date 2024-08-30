@@ -8,48 +8,42 @@ use std::time::Duration;
 struct Plugin {
     _context_id: u32,
     config: PluginConfig,
+    telemetry: Telemetry,
 }
 
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Deserialize, Clone, Default)]
 struct PluginConfig {
     upstream_name: String,
     api_path: String,
     authority: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Default, Clone)]
 struct Telemetry {
-    telemetry_type: Type,
-    request: Option<Reqquest>,
-    response: Option<Ressponse>,
+    context_id: u32,
+    request: Reqquest,
+    response: Ressponse,
 }
 
-#[derive(Serialize)]
-enum Type {
-    RequestHeader,
-    Request,
-    ResponseHeader,
-    Response,
-}
-
-#[derive(Serialize)]
+#[derive(Serialize, Clone, Default)]
 struct Reqquest {
-    headers: Option<ReqHeaders>,
+    headers: ReqHeaders,
     source_url: String,
     source_port: u16,
     destination_url: String,
     destination_port: u16,
-}
-
-#[derive(Serialize)]
-struct Ressponse {
-    headers: Option<ResHeaders>,
     body: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone, Default)]
+struct Ressponse {
+    headers: ResHeaders,
+    body: String,
+}
+
+#[derive(Serialize, Clone, Default)]
 struct ReqHeaders {
-    authority: String,
+    host: String,
     path: String,
     method: String,
     scheme: String,
@@ -58,7 +52,7 @@ struct ReqHeaders {
     user_agent: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone, Default)]
 struct ResHeaders {
     status_code: u16,
     content_length: u32,
@@ -72,7 +66,12 @@ fn _start() {
     }}
 }
 
-impl Context for Plugin {}
+impl Context for Plugin {
+    fn on_done(&mut self) -> bool {
+        dispatch_http_call_to_upstream(self);
+        false
+    }
+}
 
 impl RootContext for Plugin {
     fn on_configure(&mut self, _plugin_configuration_size: usize) -> bool {
@@ -92,6 +91,7 @@ impl RootContext for Plugin {
         Some(Box::new(Plugin {
             _context_id,
             config: self.config.clone(),
+            telemetry: Default::default(),
         }))
     }
 
@@ -118,38 +118,40 @@ impl HttpContext for Plugin {
             .unwrap_or_default(),
         );
 
-        let telemetry = Telemetry {
-            telemetry_type: Type::RequestHeader,
-            request: Some(Reqquest {
-                headers: Some(construct_req_headers(self)),
-                source_url: src_url,
-                source_port: src_port,
-                destination_url: dest_url,
-                destination_port: dest_port,
-            }),
-            response: None,
+        self.telemetry.context_id = self._context_id;
+        self.telemetry.request = Reqquest {
+            headers: construct_req_headers(self),
+            source_url: src_url,
+            source_port: src_port,
+            destination_url: dest_url,
+            destination_port: dest_port,
+            body: "".to_string(),
         };
 
-        let telemetry_json = serde_json::to_string(&telemetry).unwrap_or_default();
-        dispatch_http_call_to_sentryflow(self, telemetry_json)
+        Action::Continue
     }
 
     fn on_http_request_body(&mut self, _body_size: usize, _end_of_stream: bool) -> Action {
-        todo!()
+        // Currently, we're sending the entire HTTP response body. We might need to
+        // implement a size limit. For example, if the body size exceeds a certain threshold,
+        // we could choose not to send it.
+        let body = String::from_utf8(
+            self.get_http_request_body(0, _body_size)
+                .unwrap_or_default(),
+        )
+        .unwrap_or_default();
+        self.telemetry.request.body = body;
+
+        Action::Continue
     }
 
     fn on_http_response_headers(&mut self, _num_headers: usize, _end_of_stream: bool) -> Action {
-        let telemetry = Telemetry {
-            telemetry_type: Type::ResponseHeader,
-            request: None,
-            response: Some(Ressponse {
-                headers: Some(construct_res_headers(self)),
-                body: "".to_string(),
-            }),
+        self.telemetry.response = Ressponse {
+            headers: construct_res_headers(self),
+            body: "".to_string(),
         };
 
-        let telemetry_json = serde_json::to_string(&telemetry).unwrap_or_default();
-        dispatch_http_call_to_sentryflow(self, telemetry_json)
+        Action::Continue
     }
 
     fn on_http_response_body(&mut self, _body_size: usize, _end_of_stream: bool) -> Action {
@@ -159,21 +161,19 @@ impl HttpContext for Plugin {
         )
         .unwrap_or_default();
 
-        let telemetry = Telemetry {
-            telemetry_type: Type::Response,
-            request: None,
-            response: Some(Ressponse {
-                headers: None,
-                body,
-            }),
+        let existing_res_headers = self.telemetry.response.headers.clone();
+        self.telemetry.response = Ressponse {
+            headers: existing_res_headers,
+            body,
         };
 
-        let telemetry_json = serde_json::to_string(&telemetry).unwrap_or_default();
-        dispatch_http_call_to_sentryflow(self, telemetry_json)
+        Action::Continue
     }
 }
 
-fn dispatch_http_call_to_sentryflow(obj: &mut Plugin, telemetry: String) -> Action {
+fn dispatch_http_call_to_upstream(obj: &mut Plugin) {
+    let telemetry_json = serde_json::to_string(&obj.telemetry).unwrap_or_default();
+
     let headers = vec![
         (":method", "POST"),
         (":authority", &obj.config.authority),
@@ -185,7 +185,7 @@ fn dispatch_http_call_to_sentryflow(obj: &mut Plugin, telemetry: String) -> Acti
     let http_call_res = obj.dispatch_http_call(
         &obj.config.upstream_name,
         headers,
-        Some(telemetry.as_bytes()),
+        Some(telemetry_json.as_bytes()),
         vec![],
         Duration::from_secs(1),
     );
@@ -196,8 +196,6 @@ fn dispatch_http_call_to_sentryflow(obj: &mut Plugin, telemetry: String) -> Acti
             &obj.config.upstream_name,
         );
     }
-
-    Action::Continue
 }
 
 fn construct_res_headers(obj: &mut Plugin) -> ResHeaders {
@@ -224,7 +222,7 @@ fn construct_res_headers(obj: &mut Plugin) -> ResHeaders {
 
 fn construct_req_headers(obj: &mut Plugin) -> ReqHeaders {
     ReqHeaders {
-        authority: obj
+        host: obj
             .get_http_request_header(":authority")
             .unwrap_or_default(),
         path: obj.get_http_request_header(":path").unwrap_or_default(),

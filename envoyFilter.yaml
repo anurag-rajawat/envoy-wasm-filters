@@ -1,9 +1,7 @@
 apiVersion: networking.istio.io/v1alpha3
 kind: EnvoyFilter
 metadata:
-  name: trace-filter
-  labels:
-    workload-type: pod
+  name: http-filter
 spec:
   configPatches:
     - applyTo: HTTP_FILTER
@@ -24,13 +22,13 @@ spec:
             typeUrl: type.googleapis.com/envoy.extensions.filters.http.wasm.v3.Wasm
             value:
               config:
-                name: trace-outbound-filter
-                rootId: trace-outbound-filter
+                name: http-filter
+                rootId: http-filter
                 configuration:
                   "@type": "type.googleapis.com/google.protobuf.StringValue"
                   value: |
                     {
-                        "upstream_name": "trace_analyzer",
+                        "upstream_name": "filterserver",
                         "authority": "sentryflow",
                         "api_path": "/v1/api/telemetry"
                     }
@@ -39,54 +37,53 @@ spec:
                     local:
                       filename: /var/local/lib/wasm-filters/httpfilters.wasm
                   runtime: envoy.wasm.runtime.v8
-                  vmId: trace-outbound-filter
-
-    - applyTo: HTTP_FILTER
-      match:
-        context: SIDECAR_OUTBOUND
-        listener:
-          filterChain:
-            filter:
-              name: envoy.filters.network.http_connection_manager
-              subFilter:
-                name: envoy.filters.http.router
-      patch:
-        operation: INSERT_BEFORE
-        value:
-          name: envoy.filters.http.wasm
-          typedConfig:
-            '@type': type.googleapis.com/udpa.type.v1.TypedStruct
-            typeUrl: type.googleapis.com/envoy.extensions.filters.http.wasm.v3.Wasm
-            value:
-              config:
-                name: trace-outbound-filter
-                rootId: trace-outbound-filter
-                configuration:
-                  "@type": "type.googleapis.com/google.protobuf.StringValue"
-                  value: |
-                    {
-                        "upstream_name": "trace_analyzer",
-                        "authority": "sentryflow",
-                        "api_path": "/v1/api/telemetry"
-                    }
-                vmConfig:
-                  code:
-                    local:
-                      filename: /var/local/lib/wasm-filters/httpfilters.wasm
-                  runtime: envoy.wasm.runtime.v8
-                  vmId: trace-outbound-filter
+                  vmId: filterserver
+#    - applyTo: HTTP_FILTER
+#      match:
+#        context: SIDECAR_OUTBOUND
+#        listener:
+#          filterChain:
+#            filter:
+#              name: envoy.filters.network.http_connection_manager
+#              subFilter:
+#                name: envoy.filters.http.router
+#      patch:
+#        operation: INSERT_BEFORE
+#        value:
+#          name: envoy.filters.http.wasm
+#          typedConfig:
+#            '@type': type.googleapis.com/udpa.type.v1.TypedStruct
+#            typeUrl: type.googleapis.com/envoy.extensions.filters.http.wasm.v3.Wasm
+#            value:
+#              config:
+#                name: filterserver
+#                rootId: filterserver
+#                configuration:
+#                  "@type": "type.googleapis.com/google.protobuf.StringValue"
+#                  value: |
+#                    {
+#                        "upstream_name": "filterserver",
+#                        "authority": "sentryflow",
+#                        "api_path": "/v1/api/telemetry"
+#                    }
+#                vmConfig:
+#                  code:
+#                    local:
+#                      filename: /var/local/lib/wasm-filters/httpfilters.wasm
+#                  runtime: envoy.wasm.runtime.v8
+#                  vmId: filterserver
     - applyTo: CLUSTER
       match:
         context: SIDECAR_OUTBOUND
       patch:
         operation: ADD
-        value: # cluster specification
-          name: trace_analyzer
+        value:
+          name: filterserver
           type: LOGICAL_DNS
           connect_timeout: 0.5s
           lb_policy: ROUND_ROBIN
           load_assignment:
-            cluster_name: trace_analyzer
+            cluster_name: filterserver
             endpoints:
               - lb_endpoints:
                   - endpoint:

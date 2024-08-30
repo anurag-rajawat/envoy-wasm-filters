@@ -39,7 +39,7 @@ static_resources:
                             {
                                 "upstream_name": "filterserver",
                                 "authority": "sentryflow",
-                                "api_path": "/api/telemetry"
+                                "api_path": "/v1/api/telemetry"
                             }
                         vm_config:
                           runtime: "envoy.wasm.runtime.v8"
