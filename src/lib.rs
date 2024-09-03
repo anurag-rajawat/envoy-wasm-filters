@@ -1,7 +1,8 @@
-use log::{error, warn};
+use log::error;
 use proxy_wasm::traits::{Context, HttpContext, RootContext};
 use proxy_wasm::types::{Action, ContextType, LogLevel};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::time::Duration;
 
 #[derive(Default)]
@@ -27,49 +28,34 @@ struct Telemetry {
 
 #[derive(Serialize, Clone, Default)]
 struct Reqquest {
-    headers: ReqHeaders,
+    headers: HashMap<String, String>,
     source_url: String,
     source_port: u16,
+    source_namespace: String,
     destination_url: String,
     destination_port: u16,
+    destination_namespace: String,
     body: String,
 }
 
-#[derive(Serialize, Clone, Default)]
+#[derive(Serialize, Clone, Default, Debug)]
 struct Ressponse {
-    headers: ResHeaders,
+    headers: HashMap<String, String>,
     body: String,
-}
-
-#[derive(Serialize, Clone, Default)]
-struct ReqHeaders {
-    host: String,
-    path: String,
-    method: String,
-    scheme: String,
-    protocol: String,
-    request_id: String,
-    user_agent: String,
-}
-
-#[derive(Serialize, Clone, Default)]
-struct ResHeaders {
-    status_code: u16,
-    content_length: u32,
-    content_type: String,
 }
 
 fn _start() {
     proxy_wasm::main! {{
-        proxy_wasm::set_log_level(LogLevel::Info);
+        proxy_wasm::set_log_level(LogLevel::Warn);
         proxy_wasm::set_root_context(|_| -> Box<dyn RootContext> {Box::new(Plugin::default())});
     }}
 }
 
 impl Context for Plugin {
     fn on_done(&mut self) -> bool {
+        find_and_update_dest_namespace(self);
         dispatch_http_call_to_upstream(self);
-        false
+        true
     }
 }
 
@@ -82,7 +68,7 @@ impl RootContext for Plugin {
                 error!("Failed to parse plugin config");
             }
         } else {
-            warn!("No plugin config found");
+            error!("No plugin config found");
         }
         true
     }
@@ -118,21 +104,25 @@ impl HttpContext for Plugin {
             .unwrap_or_default(),
         );
 
+        let req_headers = self.get_http_request_headers();
+        let mut headers: HashMap<String, String> = HashMap::with_capacity(req_headers.len());
+        for header in req_headers {
+            headers.insert(header.0, header.1);
+        }
+
         self.telemetry.context_id = self._context_id;
-        self.telemetry.request = Reqquest {
-            headers: construct_req_headers(self),
-            source_url: src_url,
-            source_port: src_port,
-            destination_url: dest_url,
-            destination_port: dest_port,
-            body: "".to_string(),
-        };
+        self.telemetry.request.headers = headers;
+        self.telemetry.request.source_url = src_url;
+        self.telemetry.request.source_port = src_port;
+        self.telemetry.request.destination_url = dest_url;
+        self.telemetry.request.destination_port = dest_port;
+        find_and_update_src_namespace(self);
 
         Action::Continue
     }
 
     fn on_http_request_body(&mut self, _body_size: usize, _end_of_stream: bool) -> Action {
-        // Currently, we're sending the entire HTTP response body. We might need to
+        // Currently, we're sending the entire HTTP request body. We might need to
         // implement a size limit. For example, if the body size exceeds a certain threshold,
         // we could choose not to send it.
         let body = String::from_utf8(
@@ -140,33 +130,36 @@ impl HttpContext for Plugin {
                 .unwrap_or_default(),
         )
         .unwrap_or_default();
-        self.telemetry.request.body = body;
 
+        if !body.is_empty() {
+            self.telemetry.request.body = body;
+        }
         Action::Continue
     }
 
     fn on_http_response_headers(&mut self, _num_headers: usize, _end_of_stream: bool) -> Action {
-        self.telemetry.response = Ressponse {
-            headers: construct_res_headers(self),
-            body: "".to_string(),
-        };
+        let res_headers = self.get_http_response_headers();
+        let mut headers: HashMap<String, String> = HashMap::with_capacity(res_headers.len());
+        for res_header in res_headers {
+            headers.insert(res_header.0, res_header.1);
+        }
 
+        self.telemetry.response.headers = headers;
         Action::Continue
     }
 
     fn on_http_response_body(&mut self, _body_size: usize, _end_of_stream: bool) -> Action {
+        // Currently, we're sending the entire HTTP response body. We might need to
+        // implement a size limit. For example, if the body size exceeds a certain threshold,
+        // we could choose not to send it.
         let body = String::from_utf8(
             self.get_http_response_body(0, _body_size)
                 .unwrap_or_default(),
         )
         .unwrap_or_default();
-
-        let existing_res_headers = self.telemetry.response.headers.clone();
-        self.telemetry.response = Ressponse {
-            headers: existing_res_headers,
-            body,
-        };
-
+        if !body.is_empty() {
+            self.telemetry.response.body = body;
+        }
         Action::Continue
     }
 }
@@ -198,50 +191,6 @@ fn dispatch_http_call_to_upstream(obj: &mut Plugin) {
     }
 }
 
-fn construct_res_headers(obj: &mut Plugin) -> ResHeaders {
-    let status_code: u16 = obj
-        .get_http_response_header(":status")
-        .unwrap_or_default()
-        .parse()
-        .unwrap_or_default();
-
-    let content_length: u32 = obj
-        .get_http_response_header("content-length")
-        .unwrap_or_default()
-        .parse()
-        .unwrap_or_default();
-
-    ResHeaders {
-        status_code,
-        content_length,
-        content_type: obj
-            .get_http_response_header("content-type")
-            .unwrap_or_default(),
-    }
-}
-
-fn construct_req_headers(obj: &mut Plugin) -> ReqHeaders {
-    ReqHeaders {
-        host: obj
-            .get_http_request_header(":authority")
-            .unwrap_or_default(),
-        path: obj.get_http_request_header(":path").unwrap_or_default(),
-        method: obj.get_http_request_header(":method").unwrap_or_default(),
-        scheme: obj.get_http_request_header(":scheme").unwrap_or_default(),
-        protocol: String::from_utf8(
-            obj.get_property(vec!["request", "protocol"])
-                .unwrap_or_default(),
-        )
-        .unwrap_or_default(),
-        request_id: obj
-            .get_http_request_header("x-request-id")
-            .unwrap_or_default(),
-        user_agent: obj
-            .get_http_request_header("user-agent")
-            .unwrap_or_default(),
-    }
-}
-
 fn get_url_and_port(address: String) -> (String, u16) {
     let parts: Vec<&str> = address.split(':').collect();
 
@@ -256,4 +205,39 @@ fn get_url_and_port(address: String) -> (String, u16) {
     }
 
     (url, port)
+}
+
+fn find_and_update_src_namespace(obj: &mut Plugin) {
+    // Dirty way to get the source namespace
+    // "sidecar~10.244.0.10~httpd-c6d6cb94b-k6rv6.default~default.svc.cluster.local",
+    // sidecar~<POD_IP>~<POD_NAME.NAMESPACE><SERVICE>
+    let src_ns = obj
+        .get_http_request_header("x-envoy-peer-metadata-id")
+        .unwrap_or("".to_string());
+    if !src_ns.is_empty() {
+        let parts: Vec<&str> = src_ns.split("~").collect();
+        let svc_parts: Vec<&str> = parts[3].split(".").collect();
+        obj.telemetry.request.source_namespace = svc_parts[0].to_string();
+    }
+}
+
+fn find_and_update_dest_namespace(obj: &mut Plugin) {
+    let dest_ns = String::from_utf8(
+        obj.get_property(vec![
+            "upstream_host_metadata",
+            "filter_metadata",
+            "istio",
+            "workload",
+        ])
+        .unwrap_or_default(),
+    )
+    .unwrap_or_default();
+
+    // e.g., filterserver;sentryflow;filterserver;;Kubernetes
+    if !dest_ns.is_empty() {
+        let parts: Vec<&str> = dest_ns.split(";").collect();
+        if parts.len() == 5 || parts.len() == 4 {
+            obj.telemetry.request.destination_namespace = parts[1].to_string();
+        }
+    }
 }

@@ -6,7 +6,7 @@ spec:
   configPatches:
     - applyTo: HTTP_FILTER
       match:
-        context: SIDECAR_INBOUND
+        context: SIDECAR_OUTBOUND
         listener:
           filterChain:
             filter:
@@ -30,7 +30,7 @@ spec:
                     {
                         "upstream_name": "filterserver",
                         "authority": "sentryflow",
-                        "api_path": "/v1/api/telemetry"
+                        "api_path": "/api/v1/telemetry"
                     }
                 vmConfig:
                   code:
@@ -38,40 +38,6 @@ spec:
                       filename: /var/local/lib/wasm-filters/httpfilters.wasm
                   runtime: envoy.wasm.runtime.v8
                   vmId: filterserver
-#    - applyTo: HTTP_FILTER
-#      match:
-#        context: SIDECAR_OUTBOUND
-#        listener:
-#          filterChain:
-#            filter:
-#              name: envoy.filters.network.http_connection_manager
-#              subFilter:
-#                name: envoy.filters.http.router
-#      patch:
-#        operation: INSERT_BEFORE
-#        value:
-#          name: envoy.filters.http.wasm
-#          typedConfig:
-#            '@type': type.googleapis.com/udpa.type.v1.TypedStruct
-#            typeUrl: type.googleapis.com/envoy.extensions.filters.http.wasm.v3.Wasm
-#            value:
-#              config:
-#                name: filterserver
-#                rootId: filterserver
-#                configuration:
-#                  "@type": "type.googleapis.com/google.protobuf.StringValue"
-#                  value: |
-#                    {
-#                        "upstream_name": "filterserver",
-#                        "authority": "sentryflow",
-#                        "api_path": "/v1/api/telemetry"
-#                    }
-#                vmConfig:
-#                  code:
-#                    local:
-#                      filename: /var/local/lib/wasm-filters/httpfilters.wasm
-#                  runtime: envoy.wasm.runtime.v8
-#                  vmId: filterserver
     - applyTo: CLUSTER
       match:
         context: SIDECAR_OUTBOUND
