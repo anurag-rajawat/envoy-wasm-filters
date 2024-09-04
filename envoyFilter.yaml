@@ -30,7 +30,7 @@ spec:
                     {
                         "upstream_name": "filterserver",
                         "authority": "sentryflow",
-                        "api_path": "/api/v1/telemetry"
+                        "api_path": "/api/v1/events"
                     }
                 vmConfig:
                   code:

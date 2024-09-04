@@ -24,17 +24,21 @@ struct Telemetry {
     context_id: u32,
     request: Reqquest,
     response: Ressponse,
+    source: Workload,
+    destination: Workload,
+}
+
+#[derive(Serialize, Default, Clone)]
+struct Workload {
+    name: String,
+    namespace: String,
+    ip: String,
+    port: u16,
 }
 
 #[derive(Serialize, Clone, Default)]
 struct Reqquest {
     headers: HashMap<String, String>,
-    source_url: String,
-    source_port: u16,
-    source_namespace: String,
-    destination_url: String,
-    destination_port: u16,
-    destination_namespace: String,
     body: String,
 }
 
@@ -53,7 +57,6 @@ fn _start() {
 
 impl Context for Plugin {
     fn on_done(&mut self) -> bool {
-        find_and_update_dest_namespace(self);
         dispatch_http_call_to_upstream(self);
         true
     }
@@ -88,15 +91,7 @@ impl RootContext for Plugin {
 
 impl HttpContext for Plugin {
     fn on_http_request_headers(&mut self, _num_headers: usize, _end_of_stream: bool) -> Action {
-        let (dest_url, dest_port) = get_url_and_port(
-            String::from_utf8(
-                self.get_property(vec!["destination", "address"])
-                    .unwrap_or_default(),
-            )
-            .unwrap_or_default(),
-        );
-
-        let (src_url, src_port) = get_url_and_port(
+        let (src_ip, src_port) = get_url_and_port(
             String::from_utf8(
                 self.get_property(vec!["source", "address"])
                     .unwrap_or_default(),
@@ -112,11 +107,15 @@ impl HttpContext for Plugin {
 
         self.telemetry.context_id = self._context_id;
         self.telemetry.request.headers = headers;
-        self.telemetry.request.source_url = src_url;
-        self.telemetry.request.source_port = src_port;
-        self.telemetry.request.destination_url = dest_url;
-        self.telemetry.request.destination_port = dest_port;
-        find_and_update_src_namespace(self);
+        self.telemetry.source.ip = src_ip;
+        self.telemetry.source.port = src_port;
+
+        let name_and_ns_header = self
+            .get_http_request_header("x-envoy-peer-metadata-id")
+            .unwrap_or_default();
+        let (name, namespace) = find_name_and_namespace(name_and_ns_header);
+        self.telemetry.source.name = name;
+        self.telemetry.source.namespace = namespace;
 
         Action::Continue
     }
@@ -138,6 +137,14 @@ impl HttpContext for Plugin {
     }
 
     fn on_http_response_headers(&mut self, _num_headers: usize, _end_of_stream: bool) -> Action {
+        let (dest_ip, dest_port) = get_url_and_port(
+            String::from_utf8(
+                self.get_property(vec!["destination", "address"])
+                    .unwrap_or_default(),
+            )
+            .unwrap_or_default(),
+        );
+
         let res_headers = self.get_http_response_headers();
         let mut headers: HashMap<String, String> = HashMap::with_capacity(res_headers.len());
         for res_header in res_headers {
@@ -145,6 +152,15 @@ impl HttpContext for Plugin {
         }
 
         self.telemetry.response.headers = headers;
+        self.telemetry.destination.ip = dest_ip;
+        self.telemetry.destination.port = dest_port;
+        let name_and_ns_header = self
+            .get_http_response_header("x-envoy-peer-metadata-id")
+            .unwrap_or_default();
+        let (name, namespace) = find_name_and_namespace(name_and_ns_header);
+        self.telemetry.destination.name = name;
+        self.telemetry.destination.namespace = namespace;
+
         Action::Continue
     }
 
@@ -207,37 +223,19 @@ fn get_url_and_port(address: String) -> (String, u16) {
     (url, port)
 }
 
-fn find_and_update_src_namespace(obj: &mut Plugin) {
-    // Dirty way to get the source namespace
+fn find_name_and_namespace(src_and_ns_header: String) -> (String, String) {
+    // Dirty way to get the name and namespace
     // "sidecar~10.244.0.10~httpd-c6d6cb94b-k6rv6.default~default.svc.cluster.local",
-    // sidecar~<POD_IP>~<POD_NAME.NAMESPACE><SERVICE>
-    let src_ns = obj
-        .get_http_request_header("x-envoy-peer-metadata-id")
-        .unwrap_or("".to_string());
-    if !src_ns.is_empty() {
-        let parts: Vec<&str> = src_ns.split("~").collect();
-        let svc_parts: Vec<&str> = parts[3].split(".").collect();
-        obj.telemetry.request.source_namespace = svc_parts[0].to_string();
-    }
-}
 
-fn find_and_update_dest_namespace(obj: &mut Plugin) {
-    let dest_ns = String::from_utf8(
-        obj.get_property(vec![
-            "upstream_host_metadata",
-            "filter_metadata",
-            "istio",
-            "workload",
-        ])
-        .unwrap_or_default(),
-    )
-    .unwrap_or_default();
+    if !src_and_ns_header.is_empty() {
+        let parts: Vec<&str> = src_and_ns_header.split("~").collect();
 
-    // e.g., filterserver;sentryflow;filterserver;;Kubernetes
-    if !dest_ns.is_empty() {
-        let parts: Vec<&str> = dest_ns.split(";").collect();
-        if parts.len() == 5 || parts.len() == 4 {
-            obj.telemetry.request.destination_namespace = parts[1].to_string();
-        }
+        let raw_source_name: Vec<&str> = parts[2].split(".").collect();
+        let name = raw_source_name[0].to_string();
+
+        let raw_namespace: Vec<&str> = parts[parts.len() - 1].split(".").collect();
+        let namespace = raw_namespace[0].to_string();
+        return (name, namespace);
     }
+    ("".to_string(), "".to_string())
 }
