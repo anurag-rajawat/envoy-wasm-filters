@@ -2,105 +2,56 @@
 
 This is an HTTP filter that will observe the API calls made to/from a k8s workload.
 
-## Samples:
+## Sample API Event:
 
-- Simple API Event:
-  ```json
-  {
-    "context_id": 2,
-    "request": {
-      "headers": {
-        "user-agent": "Wget",
-        ":path": "/",
-        ":scheme": "http",
-        "x-request-id": "183d4792-7d2c-9559-b9c7-60270f37a25a",
-        "x-envoy-decorator-operation": "user-svc.prod.svc.cluster.local:8080/*",
-        ":authority": "user-svc.prod:8080",
-        "x-envoy-peer-metadata": "ChkKDkFQUF9DT05UQUlORVJTEgcaBWh0dHBkChoKCkNMVVNURVJfSUQSDBoKS3ViZXJuZXRlcwodCgxJTlNUQU5DRV9JUFMSDRoLMTAuMjQ0LjAuMTgKGQoNSVNUSU9fVkVSU0lPThIIGgYxLjIxLjIKoQEKBkxBQkVMUxKWASqTAQoOCgNhcHASBxoFaHR0cGQKJAoZc2VjdXJpdHkuaXN0aW8uaW8vdGxzTW9kZRIHGgVpc3RpbwoqCh9zZXJ2aWNlLmlzdGlvLmlvL2Nhbm9uaWNhbC1uYW1lEgcaBWh0dHBkCi8KI3NlcnZpY2UuaXN0aW8uaW8vY2Fub25pY2FsLXJldmlzaW9uEggaBmxhdGVzdAoaCgdNRVNIX0lEEg8aDWNsdXN0ZXIubG9jYWwKHwoETkFNRRIXGhVodHRwZC1jNmQ2Y2I5NGItN3N3OGoKFgoJTkFNRVNQQUNFEgkaB2RlZmF1bHQKSQoFT1dORVISQBo+a3ViZXJuZXRlczovL2FwaXMvYXBwcy92MS9uYW1lc3BhY2VzL2RlZmF1bHQvZGVwbG95bWVudHMvaHR0cGQKGAoNV09SS0xPQURfTkFNRRIHGgVodHRwZA==",
-        ":method": "GET",
-        "x-envoy-peer-metadata-id": "sidecar~10.244.0.18~httpd-c6d6cb94b-7sw8j.default~default.svc.cluster.local",
-        "x-forwarded-proto": "http"
-      },
-      "body": ""
-    },
-    "response": {
-      "headers": {
-        "x-envoy-peer-metadata-id": "sidecar~10.244.0.17~rest-api-66df6cbbfc-c6rd2.prod~prod.svc.cluster.local",
-        "date": "Wed, 04 Sep 2024 06:14:54 GMT",
-        "server": "istio-envoy",
-        ":status": "308",
-        "content-length": "33",
-        "x-envoy-upstream-service-time": "14",
-        "content-type": "application/json; charset=utf-8",
-        "x-envoy-peer-metadata": "ChwKDkFQUF9DT05UQUlORVJTEgoaCHJlc3QtYXBpChoKCkNMVVNURVJfSUQSDBoKS3ViZXJuZXRlcwodCgxJTlNUQU5DRV9JUFMSDRoLMTAuMjQ0LjAuMTcKGQoNSVNUSU9fVkVSU0lPThIIGgYxLjIxLjIKpwEKBkxBQkVMUxKcASqZAQoRCgNhcHASChoIcmVzdC1hcGkKJAoZc2VjdXJpdHkuaXN0aW8uaW8vdGxzTW9kZRIHGgVpc3RpbwotCh9zZXJ2aWNlLmlzdGlvLmlvL2Nhbm9uaWNhbC1uYW1lEgoaCHJlc3QtYXBpCi8KI3NlcnZpY2UuaXN0aW8uaW8vY2Fub25pY2FsLXJldmlzaW9uEggaBmxhdGVzdAoaCgdNRVNIX0lEEg8aDWNsdXN0ZXIubG9jYWwKIwoETkFNRRIbGhlyZXN0LWFwaS02NmRmNmNiYmZjLWM2cmQyChMKCU5BTUVTUEFDRRIGGgRwcm9kCkkKBU9XTkVSEkAaPmt1YmVybmV0ZXM6Ly9hcGlzL2FwcHMvdjEvbmFtZXNwYWNlcy9wcm9kL2RlcGxveW1lbnRzL3Jlc3QtYXBpChsKDVdPUktMT0FEX05BTUUSChoIcmVzdC1hcGk="
-      },
-      "body": "{\"message\":\"Namaste World! 🙏\"}"
-    },
-    "source": {
-      "name": "httpd-c6d6cb94b-7sw8j",
-      "namespace": "default",
-      "ip": "10.244.0.18",
-      "port": 37704
-    },
-    "destination": {
-      "name": "rest-api-66df6cbbfc-c6rd2",
-      "namespace": "prod",
-      "ip": "10.96.18.127",
-      "port": 8080
-    }
-  }
-  ```
-
-- Simple API Event with request and response bodies:
-  ```json
-  {
+```json
+{
+  "metadata": {
     "context_id": 3,
-    "request": {
-      "headers": {
-        ":path": "/v1/signin",
-        "x-forwarded-proto": "http",
-        "x-envoy-peer-metadata-id": "sidecar~10.244.0.18~httpd-c6d6cb94b-7sw8j.default~default.svc.cluster.local",
-        "user-agent": "curl/8.5.0",
-        "x-envoy-peer-metadata": "ChkKDkFQUF9DT05UQUlORVJTEgcaBWh0dHBkChoKCkNMVVNURVJfSUQSDBoKS3ViZXJuZXRlcwodCgxJTlNUQU5DRV9JUFMSDRoLMTAuMjQ0LjAuMTgKGQoNSVNUSU9fVkVSU0lPThIIGgYxLjIxLjIKoQEKBkxBQkVMUxKWASqTAQoOCgNhcHASBxoFaHR0cGQKJAoZc2VjdXJpdHkuaXN0aW8uaW8vdGxzTW9kZRIHGgVpc3RpbwoqCh9zZXJ2aWNlLmlzdGlvLmlvL2Nhbm9uaWNhbC1uYW1lEgcaBWh0dHBkCi8KI3NlcnZpY2UuaXN0aW8uaW8vY2Fub25pY2FsLXJldmlzaW9uEggaBmxhdGVzdAoaCgdNRVNIX0lEEg8aDWNsdXN0ZXIubG9jYWwKHwoETkFNRRIXGhVodHRwZC1jNmQ2Y2I5NGItN3N3OGoKFgoJTkFNRVNQQUNFEgkaB2RlZmF1bHQKSQoFT1dORVISQBo+a3ViZXJuZXRlczovL2FwaXMvYXBwcy92MS9uYW1lc3BhY2VzL2RlZmF1bHQvZGVwbG95bWVudHMvaHR0cGQKGAoNV09SS0xPQURfTkFNRRIHGgVodHRwZA==",
-        "x-request-id": "56e1acc9-b97f-9552-b584-6bb856b27e67",
-        ":method": "POST",
-        ":authority": "user-svc.prod:8080",
-        ":scheme": "http",
-        "x-envoy-decorator-operation": "user-svc.prod.svc.cluster.local:8080/*",
-        "accept": "*/*",
-        "content-type": "application/json",
-        "content-length": "48"
-      },
-      "body": "{\"email\": \"abc@email.com\", \"password\": \"abcdef\"}"
+    "timestamp": 1726211548,
+    "istio_version": "1.23.0",
+    "mesh_id": "cluster.local",
+    "node_name": "kind-control-plane"
+  },
+  "request": {
+    "headers": {
+      ":scheme": "http",
+      ":method": "GET",
+      "x-envoy-decorator-operation": "filterserver.sentryflow.svc.cluster.local:80/*",
+      ":authority": "filterserver.sentryflow",
+      "x-envoy-peer-metadata": "ChoKCkNMVVNURVJfSUQSDBoKS3ViZXJuZXRlcwp5CgZMQUJFTFMSbyptCg4KA2FwcBIHGgVodHRwZAoqCh9zZXJ2aWNlLmlzdGlvLmlvL2Nhbm9uaWNhbC1uYW1lEgcaBWh0dHBkCi8KI3NlcnZpY2UuaXN0aW8uaW8vY2Fub25pY2FsLXJldmlzaW9uEggaBmxhdGVzdAofCgROQU1FEhcaFWh0dHBkLWM2ZDZjYjk0Yi12MjU5ZwoWCglOQU1FU1BBQ0USCRoHZGVmYXVsdApJCgVPV05FUhJAGj5rdWJlcm5ldGVzOi8vYXBpcy9hcHBzL3YxL25hbWVzcGFjZXMvZGVmYXVsdC9kZXBsb3ltZW50cy9odHRwZAoYCg1XT1JLTE9BRF9OQU1FEgcaBWh0dHBk",
+      ":path": "/",
+      "x-envoy-peer-metadata-id": "sidecar~10.244.0.27~httpd-c6d6cb94b-v259g.default~default.svc.cluster.local",
+      "user-agent": "Wget",
+      "x-forwarded-proto": "http",
+      "x-request-id": "6b2e87df-257c-931e-a996-5517b8155b4a"
     },
-    "response": {
-      "headers": {
-        "content-length": "191",
-        "x-envoy-peer-metadata": "ChwKDkFQUF9DT05UQUlORVJTEgoaCHJlc3QtYXBpChoKCkNMVVNURVJfSUQSDBoKS3ViZXJuZXRlcwodCgxJTlNUQU5DRV9JUFMSDRoLMTAuMjQ0LjAuMTcKGQoNSVNUSU9fVkVSU0lPThIIGgYxLjIxLjIKpwEKBkxBQkVMUxKcASqZAQoRCgNhcHASChoIcmVzdC1hcGkKJAoZc2VjdXJpdHkuaXN0aW8uaW8vdGxzTW9kZRIHGgVpc3RpbwotCh9zZXJ2aWNlLmlzdGlvLmlvL2Nhbm9uaWNhbC1uYW1lEgoaCHJlc3QtYXBpCi8KI3NlcnZpY2UuaXN0aW8uaW8vY2Fub25pY2FsLXJldmlzaW9uEggaBmxhdGVzdAoaCgdNRVNIX0lEEg8aDWNsdXN0ZXIubG9jYWwKIwoETkFNRRIbGhlyZXN0LWFwaS02NmRmNmNiYmZjLWM2cmQyChMKCU5BTUVTUEFDRRIGGgRwcm9kCkkKBU9XTkVSEkAaPmt1YmVybmV0ZXM6Ly9hcGlzL2FwcHMvdjEvbmFtZXNwYWNlcy9wcm9kL2RlcGxveW1lbnRzL3Jlc3QtYXBpChsKDVdPUktMT0FEX05BTUUSChoIcmVzdC1hcGk=",
-        ":status": "200",
-        "content-type": "application/json; charset=utf-8",
-        "server": "istio-envoy",
-        "date": "Wed, 04 Sep 2024 06:16:53 GMT",
-        "x-envoy-upstream-service-time": "95",
-        "set-cookie": "Authorization=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImFiY0BlbWFpbC5jb20iLCJleHBpcmVzX2F0IjoxNzI1NTE3MDEzLCJpZCI6MX0.uYn1des05sPjzQ9Q_mV27m-xJLh_NO5mSjbwi0sC17I; Path=/v1/signin; Max-Age=86400; HttpOnly",
-        "x-envoy-peer-metadata-id": "sidecar~10.244.0.17~rest-api-66df6cbbfc-c6rd2.prod~prod.svc.cluster.local"
-      },
-      "body": "{\"access_token\":\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImFiY0BlbWFpbC5jb20iLCJleHBpcmVzX2F0IjoxNzI1NTE3MDEzLCJpZCI6MX0.uYn1des05sPjzQ9Q_mV27m-xJLh_NO5mSjbwi0sC17I\",\"type\":\"bearer\"}"
+    "body": ""
+  },
+  "response": {
+    "headers": {
+      "date": "Fri, 13 Sep 2024 07:12:28 GMT",
+      "x-envoy-upstream-service-time": "1",
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "63",
+      ":status": "404"
     },
-    "source": {
-      "name": "httpd-c6d6cb94b-7sw8j",
-      "namespace": "default",
-      "ip": "10.244.0.18",
-      "port": 55440
-    },
-    "destination": {
-      "name": "rest-api-66df6cbbfc-c6rd2",
-      "namespace": "prod",
-      "ip": "10.96.18.127",
-      "port": 8080
-    }
+    "body": "{\"message\":\"The specified route / not found\",\"status\":\"failed\"}"
+  },
+  "source": {
+    "name": "httpd-c6d6cb94b-v259g",
+    "namespace": "default",
+    "ip": "10.244.0.27",
+    "port": 54636
+  },
+  "destination": {
+    "name": "",
+    "namespace": "sentryflow",
+    "ip": "10.96.158.214",
+    "port": 80
   }
-  ```
+}
+```
 
 # Getting Started
 
