@@ -3,13 +3,13 @@ use proxy_wasm::traits::{Context, HttpContext, RootContext};
 use proxy_wasm::types::{Action, ContextType, LogLevel};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, UNIX_EPOCH};
 
 #[derive(Default)]
 struct Plugin {
     _context_id: u32,
     config: PluginConfig,
-    telemetry: Telemetry,
+    api_event: APIEvent,
 }
 
 #[derive(Deserialize, Clone, Default)]
@@ -20,12 +20,21 @@ struct PluginConfig {
 }
 
 #[derive(Serialize, Default, Clone)]
-struct Telemetry {
-    context_id: u32,
+struct APIEvent {
+    metadata: Metadata,
     request: Reqquest,
     response: Ressponse,
     source: Workload,
     destination: Workload,
+}
+
+#[derive(Serialize, Default, Clone)]
+struct Metadata {
+    context_id: u32,
+    timestamp: u64,
+    istio_version: String,
+    mesh_id: String,
+    node_name: String,
 }
 
 #[derive(Serialize, Default, Clone)]
@@ -80,7 +89,7 @@ impl RootContext for Plugin {
         Some(Box::new(Plugin {
             _context_id,
             config: self.config.clone(),
-            telemetry: Default::default(),
+            api_event: Default::default(),
         }))
     }
 
@@ -105,17 +114,26 @@ impl HttpContext for Plugin {
             headers.insert(header.0, header.1);
         }
 
-        self.telemetry.context_id = self._context_id;
-        self.telemetry.request.headers = headers;
-        self.telemetry.source.ip = src_ip;
-        self.telemetry.source.port = src_port;
+        self.api_event.metadata.timestamp = self
+            .get_current_time()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        self.api_event.metadata.context_id = self._context_id;
+        self.api_event.request.headers = headers;
 
-        let name_and_ns_header = self
-            .get_http_request_header("x-envoy-peer-metadata-id")
-            .unwrap_or_default();
-        let (name, namespace) = find_name_and_namespace(name_and_ns_header);
-        self.telemetry.source.name = name;
-        self.telemetry.source.namespace = namespace;
+        self.api_event.source.ip = src_ip;
+        self.api_event.source.port = src_port;
+        self.api_event.source.name = String::from_utf8(
+            self.get_property(vec!["node", "metadata", "NAME"])
+                .unwrap_or_default(),
+        )
+        .unwrap_or_default();
+        self.api_event.source.namespace = String::from_utf8(
+            self.get_property(vec!["node", "metadata", "NAMESPACE"])
+                .unwrap_or_default(),
+        )
+        .unwrap_or_default();
 
         Action::Continue
     }
@@ -131,7 +149,7 @@ impl HttpContext for Plugin {
         .unwrap_or_default();
 
         if !body.is_empty() {
-            self.telemetry.request.body = body;
+            self.api_event.request.body = body;
         }
         Action::Continue
     }
@@ -151,15 +169,10 @@ impl HttpContext for Plugin {
             headers.insert(res_header.0, res_header.1);
         }
 
-        self.telemetry.response.headers = headers;
-        self.telemetry.destination.ip = dest_ip;
-        self.telemetry.destination.port = dest_port;
-        let name_and_ns_header = self
-            .get_http_response_header("x-envoy-peer-metadata-id")
-            .unwrap_or_default();
-        let (name, namespace) = find_name_and_namespace(name_and_ns_header);
-        self.telemetry.destination.name = name;
-        self.telemetry.destination.namespace = namespace;
+        self.api_event.response.headers = headers;
+        self.api_event.destination.ip = dest_ip;
+        self.api_event.destination.port = dest_port;
+        find_and_update_dest_namespace(self);
 
         Action::Continue
     }
@@ -174,14 +187,36 @@ impl HttpContext for Plugin {
         )
         .unwrap_or_default();
         if !body.is_empty() {
-            self.telemetry.response.body = body;
+            self.api_event.response.body = body;
         }
         Action::Continue
     }
 }
 
+fn find_and_update_dest_namespace(obj: &mut Plugin) {
+    let dest_ns = String::from_utf8(
+        obj.get_property(vec![
+            "upstream_host_metadata",
+            "filter_metadata",
+            "istio",
+            "workload",
+        ])
+        .unwrap_or_default(),
+    )
+    .unwrap_or_default();
+
+    // e.g., filterserver;sentryflow;filterserver;;Kubernetes
+    if !dest_ns.is_empty() {
+        let parts: Vec<&str> = dest_ns.split(";").collect();
+        if parts.len() == 5 || parts.len() == 4 {
+            obj.api_event.destination.namespace = parts[1].to_string();
+        }
+    }
+}
+
 fn dispatch_http_call_to_upstream(obj: &mut Plugin) {
-    let telemetry_json = serde_json::to_string(&obj.telemetry).unwrap_or_default();
+    update_metadata(obj);
+    let telemetry_json = serde_json::to_string(&obj.api_event).unwrap_or_default();
 
     let headers = vec![
         (":method", "POST"),
@@ -207,6 +242,24 @@ fn dispatch_http_call_to_upstream(obj: &mut Plugin) {
     }
 }
 
+fn update_metadata(obj: &mut Plugin) {
+    obj.api_event.metadata.node_name = String::from_utf8(
+        obj.get_property(vec!["node", "metadata", "NODE_NAME"])
+            .unwrap_or_default(),
+    )
+    .unwrap_or_default();
+    obj.api_event.metadata.mesh_id = String::from_utf8(
+        obj.get_property(vec!["node", "metadata", "MESH_ID"])
+            .unwrap_or_default(),
+    )
+    .unwrap_or_default();
+    obj.api_event.metadata.istio_version = String::from_utf8(
+        obj.get_property(vec!["node", "metadata", "ISTIO_VERSION"])
+            .unwrap_or_default(),
+    )
+    .unwrap_or_default();
+}
+
 fn get_url_and_port(address: String) -> (String, u16) {
     let parts: Vec<&str> = address.split(':').collect();
 
@@ -221,21 +274,4 @@ fn get_url_and_port(address: String) -> (String, u16) {
     }
 
     (url, port)
-}
-
-fn find_name_and_namespace(src_and_ns_header: String) -> (String, String) {
-    // Dirty way to get the name and namespace
-    // "sidecar~10.244.0.10~httpd-c6d6cb94b-k6rv6.default~default.svc.cluster.local",
-
-    if !src_and_ns_header.is_empty() {
-        let parts: Vec<&str> = src_and_ns_header.split("~").collect();
-
-        let raw_source_name: Vec<&str> = parts[2].split(".").collect();
-        let name = raw_source_name[0].to_string();
-
-        let raw_namespace: Vec<&str> = parts[parts.len() - 1].split(".").collect();
-        let namespace = raw_namespace[0].to_string();
-        return (name, namespace);
-    }
-    ("".to_string(), "".to_string())
 }
