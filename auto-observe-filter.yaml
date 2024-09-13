@@ -17,7 +17,7 @@ spec:
   configPatches:
     - applyTo: HTTP_FILTER
       match:
-        context: SIDECAR_OUTBOUND
+        context: ANY
         listener:
           filterChain:
             filter:
@@ -50,7 +50,7 @@ spec:
                         uri: https://raw.githubusercontent.com/anurag-rajawat/envoy-wasm-filters/main/httpfilters.wasm
                         timeout: 5s
                         cluster: remote_wasm
-                      sha256: 82b06c2d26396e7a1b0a3b3208260bb72baef8fca5d6f8d6dbaa8cb06dd1d8ee
+                      sha256: e238ab3153e11ac8a0cf500217953293e5281ccc57be3e280a3d9063649f1358
                   runtime: envoy.wasm.runtime.v8
                   vmId: http-filter
                   allow_precompiled: true
