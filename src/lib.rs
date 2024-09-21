@@ -26,6 +26,7 @@ struct APIEvent {
     response: Ressponse,
     source: Workload,
     destination: Workload,
+    protocol: String,
 }
 
 #[derive(Serialize, Default, Clone)]
@@ -121,6 +122,13 @@ impl HttpContext for Plugin {
             .as_secs();
         self.api_event.metadata.context_id = self._context_id;
         self.api_event.request.headers = headers;
+
+        let protocol = String::from_utf8(
+            self.get_property(vec!["request", "protocol"])
+                .unwrap_or_default(),
+        )
+        .unwrap_or_default();
+        self.api_event.protocol = protocol;
 
         self.api_event.source.ip = src_ip;
         self.api_event.source.port = src_port;
