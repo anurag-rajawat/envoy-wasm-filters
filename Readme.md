@@ -1,6 +1,6 @@
 # Envoy Wasm HTTP Filter
 
-This is an HTTP filter that will observe the API calls made to/from a k8s workload.
+HTTP filter to observe RESTful and gRPC API calls made to/from a k8s workload.
 
 ## Sample API Event:
 
@@ -49,7 +49,8 @@ This is an HTTP filter that will observe the API calls made to/from a k8s worklo
     "namespace": "sentryflow",
     "ip": "10.96.158.214",
     "port": 80
-  }
+  },
+  "protocol": "HTTP/1.1"
 }
 ```
 
