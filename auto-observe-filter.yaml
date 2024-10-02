@@ -50,7 +50,7 @@ spec:
                         uri: https://raw.githubusercontent.com/anurag-rajawat/envoy-wasm-filters/main/httpfilters.wasm
                         timeout: 5s
                         cluster: remote_wasm
-                      sha256: 809145740ed57c96093b770ff8049436b81b0d3f738388017fb84e8849999d07
+                      sha256: 7ebcafc52d4b58a08bd48ce8d1eda25ea054ace136dd0ca2ce320278abbbee94
                   runtime: envoy.wasm.runtime.v8
                   vmId: http-filter
                   allow_precompiled: true

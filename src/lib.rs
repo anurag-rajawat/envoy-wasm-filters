@@ -58,6 +58,8 @@ struct Ressponse {
     body: String,
 }
 
+const MAX_BODY_SIZE: usize = 1_000_000; // 1 MB
+
 fn _start() {
     proxy_wasm::main! {{
         proxy_wasm::set_log_level(LogLevel::Warn);
@@ -112,7 +114,11 @@ impl HttpContext for Plugin {
         let req_headers = self.get_http_request_headers();
         let mut headers: HashMap<String, String> = HashMap::with_capacity(req_headers.len());
         for header in req_headers {
-            headers.insert(header.0, header.1);
+            // Don't include Envoy's pseudo headers
+            // https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_conn_man/headers#id13
+            if !header.0.starts_with("x-envoy") {
+                headers.insert(header.0, header.1);
+            }
         }
 
         self.api_event.metadata.timestamp = self
@@ -147,16 +153,13 @@ impl HttpContext for Plugin {
     }
 
     fn on_http_request_body(&mut self, _body_size: usize, _end_of_stream: bool) -> Action {
-        // Currently, we're sending the entire HTTP request body. We might need to
-        // implement a size limit. For example, if the body size exceeds a certain threshold,
-        // we could choose not to send it.
         let body = String::from_utf8(
             self.get_http_request_body(0, _body_size)
                 .unwrap_or_default(),
         )
         .unwrap_or_default();
 
-        if !body.is_empty() {
+        if !body.is_empty() && body.len() <= MAX_BODY_SIZE {
             self.api_event.request.body = body;
         }
         Action::Continue
@@ -174,7 +177,11 @@ impl HttpContext for Plugin {
         let res_headers = self.get_http_response_headers();
         let mut headers: HashMap<String, String> = HashMap::with_capacity(res_headers.len());
         for res_header in res_headers {
-            headers.insert(res_header.0, res_header.1);
+            // Don't include Envoy's pseudo headers
+            // https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_conn_man/headers#id13
+            if !res_header.0.starts_with("x-envoy") {
+                headers.insert(res_header.0, res_header.1);
+            }
         }
 
         self.api_event.response.headers = headers;
@@ -186,15 +193,12 @@ impl HttpContext for Plugin {
     }
 
     fn on_http_response_body(&mut self, _body_size: usize, _end_of_stream: bool) -> Action {
-        // Currently, we're sending the entire HTTP response body. We might need to
-        // implement a size limit. For example, if the body size exceeds a certain threshold,
-        // we could choose not to send it.
         let body = String::from_utf8(
             self.get_http_response_body(0, _body_size)
                 .unwrap_or_default(),
         )
         .unwrap_or_default();
-        if !body.is_empty() {
+        if !body.is_empty() && body.len() <= MAX_BODY_SIZE {
             self.api_event.response.body = body;
         }
         Action::Continue
